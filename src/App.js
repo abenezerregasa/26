@@ -3,9 +3,8 @@ import axios from "axios";
 import PredefinedPositions from "./components/PredefinedPositions"; // Predefined field positions
 import OverlayFields from "./components/OverlayFields"; // Overlay for dragging fields
 import { toPng } from "html-to-image"; // For saving templates as images
-import jsPDF from "jspdf"; // For generating PDF
-
-
+import { PDFDocument, rgb } from "pdf-lib";
+ 
 function App() {
   const predefinedPositions = PredefinedPositions();
   const [category, setCategory] = useState("");
@@ -18,17 +17,21 @@ function App() {
   const [refreshOverlayKey, setRefreshOverlayKey] = useState(0);
   const [pdfPreview, setPdfPreview] = useState(null); // For PDF preview
   const templateRef = useRef(null);
+  const [templateClicks, setTemplateClicks] = useState({});
+
+  
 
   // Fetch templates from backend
   const fetchTemplates = async (type) => {
     try {
       const response = await axios.get(`http://localhost:8000/templates/${type}`);
-      setTemplates(response.data);
+      const validTemplates = response.data.filter((template) => template.url); // Ensure `url` exists
+      setTemplates(validTemplates);
     } catch (error) {
       console.error("Error fetching templates:", error);
     }
   };
-
+  
   // Save data to the database
   const saveDataToDatabase = async () => {
     if (!selectedTemplate) {
@@ -120,96 +123,193 @@ function App() {
     updatedFields[index][key] = value;
     setFields(updatedFields);
   };
-
-  // Generate merged image
-  const generateMergedImage = async () => {
-    if (!templateRef.current) {
-      alert("No template selected!");
-      return null;
-    }
+// adding the logic to remove template
+  const removeTemplate = (templateId, instanceNumber) => {
+    setTemplateClicks((prev) => {
+      const updated = { ...prev };
+      if (updated[templateId] > 1) {
+        updated[templateId] -= 1;
+      } else {
+        delete updated[templateId];
+      }
+      return updated;
+    });
   
-    try {
-      const dataUrl = await toPng(templateRef.current, { cacheBust: true });
-      console.log("Generated PNG Data URL:", dataUrl); // Debugging
-      return dataUrl;
-    } catch (error) {
-      console.error("Error generating merged image:", error);
-      alert("Failed to generate image!");
-      return null;
-    }
+    setFields((prev) =>
+      prev.filter(
+        (field) => !field.id.startsWith(`${templateId}-${instanceNumber}`)
+      )
+    );
   };
   
+
+ 
+  
+  const mergeImageWithOverlay = async (template) => {
+    return new Promise(async (resolve, reject) => {
+      try {
+        const canvas = document.createElement("canvas");
+        const context = canvas.getContext("2d");
+  
+        const image = new Image();
+        image.crossOrigin = "Anonymous";
+        image.src = `http://localhost:8000/fetch-image/?url=${encodeURIComponent(template.url)}`;
+  
+        image.onload = () => {
+          // Match canvas size to the image dimensions
+          canvas.width = image.width;
+          canvas.height = image.height;
+  
+          // Draw the image onto the canvas
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  
+          // Get scaling factors for consistency
+          const containerWidth = templateRef.current.offsetWidth;
+          const containerHeight = templateRef.current.offsetHeight;
+  
+          const scaleX = canvas.width / containerWidth;
+          const scaleY = canvas.height / containerHeight;
+  
+          // Draw overlay fields
+          const fieldsForTemplate = fields.filter((field) =>
+            field.id.startsWith(`${template.id}-`)
+          );
+  
+          fieldsForTemplate.forEach((field) => {
+            const adjustedX = field.x * scaleX;
+            const adjustedY = field.y * scaleY;
+            const adjustedFontSize = field.fontSize * scaleY;
+  
+            context.font = `${adjustedFontSize}px ${field.fontFamily || "Arial"}`;
+            context.fillStyle = field.color || "#000000";
+            context.fillText(field.value, adjustedX, adjustedY);
+          });
+  
+          // Convert the canvas to a base64 image URL
+          const mergedImageUrl = canvas.toDataURL("image/png");
+          resolve(mergedImageUrl);
+        };
+  
+        image.onerror = (error) => {
+          console.error("Error loading image:", error);
+          reject(error);
+        };
+      } catch (error) {
+        console.error("Error merging image with overlay:", error);
+        reject(error);
+      }
+    });
+  };
+  
+  
+  
+
   const previewPdf = async () => {
-    const mergedImage = await generateMergedImage();
-    if (!mergedImage) return;
+    try {
+      const pdfDoc = await PDFDocument.create();
+      const pageSize = [595, 842]; // A4 size
+      const margin = 10;
   
-    const pdf = new jsPDF("portrait", "px", "a4");
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 10; // Margin between images
+      const selectedTemplates = Object.entries(templateClicks)
+        .flatMap(([templateId, count]) =>
+          Array.from({ length: count }).map(() =>
+            templates.find((t) => t.id === parseInt(templateId))
+          )
+        );
   
-    const addImageSafely = (imageUrl, x, y, width, height) => {
-      const img = new Image();
-      img.src = imageUrl;
+      if (selectedTemplates.length === 0) {
+        alert("No templates selected for PDF preview.");
+        return;
+      }
   
-      img.onload = () => {
-        pdf.addImage(img, "PNG", x, y, width, height);
-      };
+      const gridSlotsPerPage = 4;
+      const pagesNeeded = Math.ceil(selectedTemplates.length / gridSlotsPerPage);
   
-      img.onerror = (error) => {
-        console.error("Error loading image for PDF:", error);
-      };
-    };
+      for (let pageIndex = 0; pageIndex < pagesNeeded; pageIndex++) {
+        const page = pdfDoc.addPage(pageSize);
   
-    if (category === "smartphone" || subCategory === "square") {
-      // Smartphone and Square Templates (2x2 grid, forcefully stretching width)
-      const forcedWidth = (pageWidth - 3 * margin) / 2; // Full width for each cell
-      const forcedHeight = forcedWidth * 0.6; // Force a slightly smaller height to make the shape rectangular
+        const templatesForPage = selectedTemplates.slice(
+          pageIndex * gridSlotsPerPage,
+          (pageIndex + 1) * gridSlotsPerPage
+        );
   
-      console.log("Forced Dimensions (Square/Smartphone):", forcedWidth, forcedHeight);
+        let currentX = margin;
+        let currentY = pageSize[1] - margin;
   
-      let currentX = margin;
-      let currentY = margin;
+        for (let i = 0; i < templatesForPage.length; i++) {
+          const template = templatesForPage[i];
   
-      for (let i = 0; i < 4; i++) {
-        addImageSafely(mergedImage, currentX, currentY, forcedWidth, forcedHeight);
-        currentX += forcedWidth + margin;
+          if (!template || !template.url) {
+            console.warn("Template is undefined or missing properties:", template);
+            continue;
+          }
   
-        if ((i + 1) % 2 === 0) {
-          currentX = margin;
-          currentY += forcedHeight + margin;
+          // Merge overlay with the image
+          const mergedImageUrl = await mergeImageWithOverlay(template);
+  
+          const imageBytes = await fetch(mergedImageUrl).then((res) =>
+            res.arrayBuffer()
+          );
+          const embeddedImage = await pdfDoc.embedPng(imageBytes);
+  
+          // Position the image in the PDF
+          const imageWidth = pageSize[0] - 2 * margin;
+          const scaleFactor = imageWidth / embeddedImage.width;
+          const imageHeight = embeddedImage.height * scaleFactor;
+  
+          page.drawImage(embeddedImage, {
+            x: margin,
+            y: currentY - imageHeight,
+            width: imageWidth,
+            height: imageHeight,
+          });
+  
+          currentY -= imageHeight + margin; // Move to next position
         }
       }
-    }
   
-    if (subCategory === "rectangular") {
-      // Rectangular Templates (4x1 grid, maintaining aspect ratio 1500x500)
-      const imgWidth = pageWidth - 2 * margin; // Full page width minus margins
-      const imgHeight = (imgWidth * 500) / 1500; // Maintain aspect ratio of 1500x500
-  
-      let currentY = margin;
-  
-      for (let i = 0; i < 4; i++) {
-        addImageSafely(mergedImage, margin, currentY, imgWidth, imgHeight);
-        currentY += imgHeight + margin;
-  
-        if (currentY + imgHeight + margin > pageHeight && i < 3) {
-          pdf.addPage(); // Add a new page for the next row
-          currentY = margin;
-        }
-      }
-    }
-  
-    setTimeout(() => {
-      const pdfUrl = pdf.output("dataurlstring");
+      const pdfBytes = await pdfDoc.save();
+      const pdfUrl = URL.createObjectURL(
+        new Blob([pdfBytes], { type: "application/pdf" })
+      );
       setPdfPreview(pdfUrl);
-    }, 1000); // Delay to allow image loading
+    } catch (error) {
+      console.error("Error during PDF generation:", error);
+      alert("Failed to generate PDF preview.");
+    }
   };
+  
+  
+  
+
+
+  const fetchSuggestionsForField = async (query, fieldId) => {
+    try {
+      const response = await axios.get("http://localhost:8000/fetch-inputs", {
+        params: {
+          query,
+          shape_type: category === "smartphone" ? "smartphone" : subCategory,
+        },
+      });
+  
+      const suggestions = response.data.length ? response.data : [];
+  
+      setFields((prevFields) =>
+        prevFields.map((field) =>
+          field.id === fieldId ? { ...field, suggestions } : field
+        )
+      );
+    } catch (error) {
+      console.error("Error fetching suggestions:", error);
+    }
+  };
+  
   
 
   
   
   
+
   return (
     <div className="min-h-screen bg-gray-100 p-6 overflow-x-hidden">
       <h1 className="text-2xl font-bold mb-6 text-center">BNO TEMPLATE GENERATOR</h1>
@@ -259,14 +359,40 @@ function App() {
             className="p-4 bg-white shadow rounded-md cursor-pointer"
             onClick={() => {
               setSelectedTemplate(template);
-              const defaultFields =
-                category === "smartphone"
-                  ? predefinedPositions.smartphone
-                  : subCategory === "rectangular"
-                  ? predefinedPositions.rectangular
-                  : predefinedPositions.square;
 
-              setFields(defaultFields.map((field) => ({ ...field, value: "" })));
+// Update the number of clicks for the selected template
+setTemplateClicks((prev) => ({
+  ...prev,
+  [template.id]: (prev[template.id] || 0) + 1,
+}));
+
+// Generate fields based on the template type
+const defaultFields = (() => {
+  if (category === "smartphone") return predefinedPositions.smartphone || [];
+  if (subCategory === "rectangular") return predefinedPositions.rectangular || [];
+  if (subCategory === "square") return predefinedPositions.square || [];
+  return [];
+})();
+
+// Debugging to confirm fields
+console.log("Default Fields for Square:", defaultFields);
+if (!defaultFields.length) {
+  alert("No predefined fields found for the square template.");
+}
+
+
+ 
+
+
+setFields((prev) => [
+  ...prev,
+  ...defaultFields.map((field) => ({
+    ...field,
+    value: "",
+    id: `${template.id}-${(templateClicks[template.id] || 0) + 1}`, // Unique field ID
+  })),
+]);
+
             }}
           >
             <h2 className="text-center">{template.name}</h2>
@@ -292,6 +418,8 @@ function App() {
               onError={(e) => (e.target.src = "https://via.placeholder.com/150")}
             />
 
+            
+
             <OverlayFields
               key={refreshOverlayKey}
               fields={hoveredData || fields}
@@ -304,79 +432,119 @@ function App() {
           </div>
 
           {/* Input Fields */}
-          <div className="mt-6">
-            {fields.map((field, index) => (
-              <div key={index} className="mb-4 relative">
-                <label className="block font-semibold mb-1">{field.name}</label>
-                <input
-                  type="text"
-                  value={
-                    hoveredData && hoveredData[index]
-                      ? hoveredData[index].value
-                      : field.value
-                  }
-                  onChange={(e) => {
-                    const updatedFields = [...fields];
-                    updatedFields[index].value = e.target.value;
-                    setFields(updatedFields);
+  <div className="mt-6 grid grid-cols-2 gap-4">
+  {fields.map((field, index) => (
+    <div key={index} className="relative p-4 bg-white border rounded shadow">
+      <label className="block font-semibold mb-1">{field.name}</label>
+      <input
+        type="text"
+        value={
+          hoveredData && hoveredData[index]
+            ? hoveredData[index].value
+            : field.value
+        }
+        onChange={(e) => {
+          const updatedFields = [...fields];
+          updatedFields[index].value = e.target.value;
+          setFields(updatedFields);
 
-                    if (field.name.toLowerCase() === "model") {
-                      fetchSuggestions(e.target.value);
-                    }
-                  }}
-                  className="block w-full p-2 border rounded mb-2"
-                />
+          if (field.name.toLowerCase() === "model") {
+            fetchSuggestionsForField(e.target.value, field.id);
+          }
+          
+        }}
+        className="block w-full p-2 border rounded mb-2"
+      />
 
-                {/* Font Customization */}
-                <div className="flex gap-4 mt-2">
-                  <label>Font Size:</label>
-                  <input
-                    type="number"
-                    value={field.fontSize || 16}
-                    onChange={(e) => updateStyle(index, "fontSize", parseInt(e.target.value, 10))}
-                    className="w-24 p-1 border rounded"
-                  />
-                  <label>Font Type:</label>
-                  <select
-                    value={field.fontFamily || "Arial"}
-                    onChange={(e) => updateStyle(index, "fontFamily", e.target.value)}
-                    className="w-32 p-1 border rounded"
-                  >
-                    <option value="Arial">Arial</option>
-                    <option value="Verdana">Verdana</option>
-                    <option value="Times New Roman">Times New Roman</option>
-                    <option value="Courier New">Courier New</option>
-                  </select>
-                  <label>Font Color:</label>
-                  <input
-                    type="color"
-                    value={field.color || "#000000"}
-                    onChange={(e) => updateStyle(index, "color", e.target.value)}
-                    className="w-10 h-10 p-1 border rounded"
-                  />
-                </div>
+      {/* Font Customization */}
+      <div className="flex gap-4 mt-2">
+        <label>Font Size:</label>
+        <input
+          type="number"
+          value={field.fontSize || 16}
+          onChange={(e) =>
+            updateStyle(index, "fontSize", parseInt(e.target.value, 10))
+          }
+          className="w-20 p-1 border rounded"
+        />
+        <label>Font Type:</label>
+        <select
+          value={field.fontFamily || "Arial"}
+          onChange={(e) => updateStyle(index, "fontFamily", e.target.value)}
+          className="w-32 p-1 border rounded"
+        >
+          <option value="Arial">Arial</option>
+          <option value="Verdana">Verdana</option>
+          <option value="Times New Roman">Times New Roman</option>
+          <option value="Courier New">Courier New</option>
+        </select>
+        <label>Font Color:</label>
+        <input
+          type="color"
+          value={field.color || "#000000"}
+          onChange={(e) => updateStyle(index, "color", e.target.value)}
+          className="w-10 h-10 p-1 border rounded"
+        />
+      </div>
 
-                {/* Suggestions */}
-                {field.name.toLowerCase() === "model" && suggestions.length > 0 && (
-                  <div
-                    className="absolute z-10 bg-white border rounded shadow-lg w-full max-h-40 overflow-y-auto"
-                    onMouseLeave={resetHoveredData}
-                  >
-                    {suggestions.map((suggestion, i) => (
-                      <div
-                        key={i}
-                        className="p-2 hover:bg-gray-200 cursor-pointer"
-                        onMouseEnter={() => previewAutofill(suggestion)}
-                        onClick={() => commitAutofill(suggestion)}
-                      >
-                        {suggestion.model}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* Suggestions */}
+      {field.suggestions && field.suggestions.length > 0 && (
+
+
+        <div
+          className="absolute z-10 bg-white border rounded shadow-lg w-full max-h-40 overflow-y-auto"
+          onMouseLeave={resetHoveredData}
+        >
+          {suggestions.map((suggestion, i) => (
+            <div
+              key={i}
+              className="p-2 hover:bg-gray-200 cursor-pointer"
+              onMouseEnter={() => previewAutofill(suggestion)}
+              onClick={() => commitAutofill(suggestion)}
+            >
+              {suggestion.model}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ))}
+</div>
+
+          {Object.entries(templateClicks).map(([templateId, count]) => {
+const template = templates.find((t) => t.id === parseInt(templateId));
+if (!template || !template.url) {
+  console.warn("Template not found or missing properties:", templateId);
+  return;
+}
+  return Array.from({ length: count }).map((_, i) => (
+    <div key={`${templateId}-${i}`} className="relative flex justify-center overflow-hidden">
+      <img
+        src={`http://localhost:8000/fetch-image/?url=${encodeURIComponent(template.url)}`}
+        alt={template.name}
+        className="max-h-96 w-auto object-contain rounded"
+        onError={(e) => (e.target.src = "https://via.placeholder.com/150")}
+      />
+      <OverlayFields
+        fields={fields.filter((field) => field && field.id.startsWith(`${templateId}-${i + 1}`))
+        }
+        updateFieldPosition={(index, x, y) => {
+          const updatedFields = [...fields];
+          updatedFields[index] = { ...updatedFields[index], x, y };
+          setFields(updatedFields);
+        }}
+      />
+      {/* Remove Template Button */}
+      <button
+        onClick={() => removeTemplate(templateId, i + 1)}
+        className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded"
+      >
+        Remove
+      </button>
+    </div>
+  ));
+})}
+
 
           {/* Buttons */}
           <button
@@ -402,23 +570,25 @@ function App() {
 
       {/* PDF Preview */}
       {pdfPreview && (
-        <div className="fixed inset-0 bg-gray-800 bg-opacity-50 flex justify-center items-center">
-          <div className="bg-white p-6 rounded shadow-lg max-w-3xl w-full">
-            <iframe
-              src={pdfPreview}
-              className="w-full h-96"
-              title="PDF Preview"
-            ></iframe>
-            <button
-              onClick={() => setPdfPreview(null)}
-              className="mt-4 bg-red-500 text-white px-4 py-2 rounded shadow"
-            >
-              Close Preview
-            </button>
-          </div>
-        </div>
-      )}
+  <div className="fixed inset-0 bg-gray-800 bg-opacity-50 flex justify-center items-center">
+    <div className="bg-white p-6 rounded shadow-lg max-w-3xl w-full">
+      <iframe
+        src={pdfPreview}
+        className="w-full h-96"
+        title="PDF Preview"
+        onLoad={() => console.log("PDF loaded successfully in iframe.")}
+        onError={() => console.error("Error loading PDF in iframe.")}
+      ></iframe>
+      <button
+        onClick={() => setPdfPreview(null)}
+        className="mt-4 bg-red-500 text-white px-4 py-2 rounded shadow"
+      >
+        Close Preview
+      </button>
     </div>
+  </div>
+)}
+   </div>
   );
 }
 
