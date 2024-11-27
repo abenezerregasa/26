@@ -2,17 +2,16 @@
 import React, { useState } from "react";
 
 const PredefinedPositions = () => {
-  // State for predefined positions
-  const [predefinedPositions] = useState({
+  return {
     smartphone: [
-      { name: "Model", x: -92, y: 127, fontSize: 42, color: "#000000" },
-      { name: "Storage", x: -131, y: 176, fontSize: 35, color: "#000000" },
-      { name: "Display", x: -26, y: 230, fontSize: 30, color: "#000000" },
-      { name: "Grado", x: -7, y: 268, fontSize: 30, color: "#000000" },
-      { name: "Price", x: 62, y: 3, fontSize: 80, color: "#000000" },
+      { name: "Model", x: 96, y: 154, fontSize: 42, color: "#000000" },
+      { name: "Storage", x: 96, y: 217, fontSize: 35, color: "#000000" },
+      { name: "Display", x: 232, y: 273, fontSize: 30, color: "#000000" },
+      { name: "Grado", x: 232, y: 323, fontSize: 30, color: "#000000" },
+      { name: "Price", x: 287, y: 23, fontSize: 80, color: "#000000" },
     ],
     rectangular: [
-      { name: "Model", x: -179, y: 62, fontSize: 25, color: "#FFFFFF" },
+      { name: "Model", x: 147, y: 26, fontSize: 25, color: "#FFFFFF" },
       { name: "RAM", x: -124, y: 100, fontSize: 25, color: "#FFFFFF" },
       { name: "CPU", x: -107, y: 140, fontSize: 25, color: "#FFFFFF" },
       { name: "SSD", x: -111, y: 183, fontSize: 25, color: "#FFFFFF" },
@@ -29,9 +28,7 @@ const PredefinedPositions = () => {
       { name: "Codice", x: 135, y: 345, fontSize: 12, color: "#000000" },
       { name: "Price", x: 123, y: -4, fontSize: 60, color: "#FFFFFF" },
     ],
-  });
-
-  return predefinedPositions;
+  };
 };
 
 export default PredefinedPositions;
