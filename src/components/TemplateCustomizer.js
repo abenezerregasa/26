@@ -1,8 +1,10 @@
+// TemplateCustomizer.js
 import React, { useState, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import PredefinedPositions from "./PredefinedPositions";
 import FontSelector from "./FontSelector";
 import PDFPreview from "./PDFPreview"; // Import PDFPreview
+import AutoSuggestion from "./AutoSuggestion"; // Import AutoSuggestion
 
 const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   const [customizations, setCustomizations] = useState({});
@@ -29,6 +31,25 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       [uniqueId]: { ...prev[uniqueId], [field]: value },
     }));
   }, []);
+
+  const handleSuggestionSelect = (uniqueId, suggestion) => {
+    setCustomizations((prev) => ({
+      ...prev,
+      [uniqueId]: {
+        ...prev[uniqueId],
+        model: suggestion.model,
+        storage: suggestion.storage,
+        display: suggestion.display,
+        grado: suggestion.grado,
+        ram: suggestion.ram,
+        cpu: suggestion.cpu,
+        ssd: suggestion.ssd,
+        graphics: suggestion.graphics,
+        codice: suggestion.codice,
+        price: suggestion.price,
+      },
+    }));
+  };
 
   const updateStyle = (uniqueId, fieldName, property, value) => {
     setCustomizations((prev) => ({
@@ -172,6 +193,11 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
 
               {/* Input Fields with Font Controls */}
               <div className="mt-4 space-y-4">
+                <AutoSuggestion
+                  templateId={template.uniqueId}
+                  handleSuggestionSelect={handleSuggestionSelect}
+                />
+
                 {(predefinedPositions[template.type] || []).map((field) => (
                   <div key={field.name} className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
