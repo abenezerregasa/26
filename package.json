@@ -20,6 +20,7 @@
     "react-dom": "^18.3.1",
     "react-draggable": "^4.4.6",
     "react-lazy-load-image-component": "^1.6.2",
+    "react-modal": "^3.16.1",
     "react-scripts": "5.0.1",
     "react-spinners": "^0.14.1",
     "react-to-print": "^3.0.2",
