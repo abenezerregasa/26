@@ -1,44 +1,25 @@
 import React, { useState, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import PredefinedPositions from "./PredefinedPositions";
+import FontSelector from "./FontSelector";
 
 const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   const [customizations, setCustomizations] = useState({});
-  const [availableFonts, setAvailableFonts] = useState([]); // Store fonts fetched from the backend
-  const [draggingPosition, setDraggingPosition] = useState({ x: 0, y: 0 }); // General position
+  const [draggingPosition, setDraggingPosition] = useState({ x: 0, y: 0 });
+  const [currentField, setCurrentField] = useState(null); // Keep track of the currently dragged field
   const predefinedPositions = PredefinedPositions();
   const scaleFactor = 0.4;
 
   useEffect(() => {
-    // Fetch fonts from the backend dynamically
-    const fetchFonts = async () => {
-      try {
-        const response = await fetch("http://localhost:8000/list-fonts"); // Adjust the URL if needed
-        const data = await response.json();
-
-        const fonts = data.fonts || [];
-        setAvailableFonts(fonts);
-
-        // Load fonts dynamically
-        const styleElement = document.createElement("style");
-        fonts.forEach((font) => {
-          const fontName = font.replace(".ttf", "");
-          const fontPath = `http://localhost:8000/fonts/${font}`;
-          const fontFace = `
-            @font-face {
-              font-family: '${fontName}';
-              src: url('${fontPath}') format('truetype');
-            }
-          `;
-          styleElement.appendChild(document.createTextNode(fontFace));
-        });
-        document.head.appendChild(styleElement);
-      } catch (error) {
-        console.error("Error fetching fonts:", error);
-      }
-    };
-
-    fetchFonts();
+    // Load fonts dynamically from Google Fonts
+    const styleElement = document.createElement("link");
+    styleElement.rel = "stylesheet";
+    styleElement.href =
+      "https://fonts.googleapis.com/css2?family=" +
+      ["Bodoni Moda", "Didot", "Garamond", "Georgia"].map(
+        (font) => font.replace(/\s+/g, "+") + "&display=swap"
+      ).join("");
+    document.head.appendChild(styleElement);
   }, []);
 
   const handleInputChange = useCallback((uniqueId, field, value) => {
@@ -47,6 +28,19 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       [uniqueId]: { ...prev[uniqueId], [field]: value },
     }));
   }, []);
+
+  const updateStyle = (uniqueId, fieldName, property, value) => {
+    setCustomizations((prev) => ({
+      ...prev,
+      [uniqueId]: {
+        ...prev[uniqueId],
+        [fieldName]: {
+          ...prev[uniqueId]?.[fieldName],
+          [property]: value,
+        },
+      },
+    }));
+  };
 
   const getGridStyle = (type) => {
     switch (type) {
@@ -61,9 +55,10 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
     }
   };
 
-  const handleDrag = useCallback((e, data) => {
+  const handleDrag = (e, data, uniqueId, fieldName) => {
     setDraggingPosition({ x: Math.round(data.x), y: Math.round(data.y) });
-  }, []);
+    setCurrentField({ uniqueId, fieldName });
+  };
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -72,10 +67,10 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
         Customize Your Templates
       </h2>
 
-      {/* General Position Counter */}
-      {draggingPosition.x !== 0 && draggingPosition.y !== 0 && (
-        <div className="fixed top-2 right-2 bg-gray-700 text-white text-sm px-4 py-2 rounded-lg z-50">
-          Position: X: {draggingPosition.x}, Y: {draggingPosition.y}
+      {/* Real-Time Position Counter */}
+      {currentField && (
+        <div className="fixed bottom-2 right-2 bg-gray-700 text-white text-sm px-4 py-2 rounded-lg z-50">
+          {`Label: ${currentField.fieldName}, Position: X: ${draggingPosition.x}, Y: ${draggingPosition.y}`}
         </div>
       )}
 
@@ -91,7 +86,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
           className="grid"
           style={{
             gridTemplateColumns: "repeat(2, 1fr)",
-            rowGap: "450px",
+            rowGap: "1000px",
             columnGap: "32px",
             alignItems: "center",
             justifyItems: "center",
@@ -143,22 +138,18 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                   <Draggable
                     key={`${template.uniqueId}-${field.name}`}
                     bounds="parent"
-                    onDrag={handleDrag}
+                    onDrag={(e, data) => handleDrag(e, data, template.uniqueId, field.name)}
                   >
                     <div
                       style={{
                         position: "absolute",
                         left: `${field.x}px`,
                         top: `${field.y}px`,
-                        fontSize: `${
-                          customizations[template.uniqueId]?.[field.name]?.fontSize ||
-                          field.fontSize
-                        }px`,
-                        color:
-                          customizations[template.uniqueId]?.[field.name]?.color ||
-                          field.color,
-                        fontFamily:
-                          customizations[template.uniqueId]?.[field.name]?.font || "Arial",
+                        fontSize: customizations[template.uniqueId]?.[field.name]?.fontSize || field.fontSize,
+                        color: customizations[template.uniqueId]?.[field.name]?.color || field.color,
+                        fontFamily: customizations[template.uniqueId]?.[field.name]?.font || "Arial",
+                        fontWeight: customizations[template.uniqueId]?.[field.name]?.bold ? "bold" : "normal",
+                        fontStyle: customizations[template.uniqueId]?.[field.name]?.italic ? "italic" : "normal",
                       }}
                       className="cursor-move bg-transparent"
                     >
@@ -179,62 +170,40 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                       type="text"
                       placeholder={`Enter ${field.name}`}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
+                      value={customizations[template.uniqueId]?.[field.name]?.text || ""}
                       onChange={(e) =>
                         handleInputChange(template.uniqueId, field.name, {
+                          ...customizations[template.uniqueId]?.[field.name],
                           text: e.target.value,
-                          fontSize:
-                            customizations[template.uniqueId]?.[field.name]?.fontSize ||
-                            field.fontSize,
-                          color:
-                            customizations[template.uniqueId]?.[field.name]?.color ||
-                            field.color,
-                          font:
-                            customizations[template.uniqueId]?.[field.name]?.font || "Arial",
                         })
                       }
                     />
-                    <div className="flex items-center gap-4">
-                      {/* Font Size Selector */}
-                      <input
-                        type="number"
-                        placeholder="Font Size (px)"
-                        className="w-1/3 px-2 py-1 border border-gray-300 rounded-lg"
-                        onChange={(e) =>
-                          handleInputChange(template.uniqueId, field.name, {
-                            ...customizations[template.uniqueId]?.[field.name],
-                            fontSize: `${e.target.value}px`,
-                          })
-                        }
-                      />
-                      {/* Font Type Selector */}
-                      <select
-                        className="w-1/3 px-2 py-1 border border-gray-300 rounded-lg"
-                        onChange={(e) =>
-                          handleInputChange(template.uniqueId, field.name, {
-                            ...customizations[template.uniqueId]?.[field.name],
-                            font: e.target.value,
-                          })
-                        }
-                      >
-                        <option value="">Select Font</option>
-                        {availableFonts.map((font) => (
-                          <option key={font} value={font.replace(".ttf", "")}>
-                            {font.replace(".ttf", "")}
-                          </option>
-                        ))}
-                      </select>
-                      {/* Font Color Picker */}
-                      <input
-                        type="color"
-                        className="w-1/3 px-2 py-1 border border-gray-300 rounded-lg"
-                        onChange={(e) =>
-                          handleInputChange(template.uniqueId, field.name, {
-                            ...customizations[template.uniqueId]?.[field.name],
-                            color: e.target.value,
-                          })
-                        }
-                      />
-                    </div>
+
+                    {/* Font Customization */}
+                    <FontSelector
+                      selectedFont={{
+                        type: customizations[template.uniqueId]?.[field.name]?.font || "",
+                        size: parseInt(customizations[template.uniqueId]?.[field.name]?.fontSize) || field.fontSize,
+                        color: customizations[template.uniqueId]?.[field.name]?.color || "",
+                        bold: customizations[template.uniqueId]?.[field.name]?.bold || false,
+                        italic: customizations[template.uniqueId]?.[field.name]?.italic || false,
+                      }}
+                      onFontChange={(font) =>
+                        updateStyle(template.uniqueId, field.name, "font", font)
+                      }
+                      onFontSizeChange={(fontSize) =>
+                        updateStyle(template.uniqueId, field.name, "fontSize", `${fontSize}px`)
+                      }
+                      onFontColorChange={(color) =>
+                        updateStyle(template.uniqueId, field.name, "color", color)
+                      }
+                      onBoldChange={(bold) =>
+                        updateStyle(template.uniqueId, field.name, "bold", bold)
+                      }
+                      onItalicChange={(italic) =>
+                        updateStyle(template.uniqueId, field.name, "italic", italic)
+                      }
+                    />
                   </div>
                 ))}
               </div>
