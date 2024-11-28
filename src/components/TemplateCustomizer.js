@@ -2,13 +2,14 @@ import React, { useState, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import PredefinedPositions from "./PredefinedPositions";
 import FontSelector from "./FontSelector";
+import PDFPreview from "./PDFPreview"; // Import PDFPreview
 
 const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   const [customizations, setCustomizations] = useState({});
   const [draggingPosition, setDraggingPosition] = useState({ x: 0, y: 0 });
   const [currentField, setCurrentField] = useState(null); // Keep track of the currently dragged field
   const predefinedPositions = PredefinedPositions();
-  const scaleFactor = 0.4;
+  const scaleFactor = 0.5;
 
   useEffect(() => {
     // Load fonts dynamically from Google Fonts
@@ -56,8 +57,14 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   };
 
   const handleDrag = (e, data, uniqueId, fieldName) => {
-    setDraggingPosition({ x: Math.round(data.x), y: Math.round(data.y) });
+    const adjustedX = Math.round(data.x / scaleFactor);
+    const adjustedY = Math.round(data.y / scaleFactor);
+    setDraggingPosition({ x: adjustedX, y: adjustedY });
     setCurrentField({ uniqueId, fieldName });
+
+    // Update the customizations state to reflect the new dragging position
+    updateStyle(uniqueId, fieldName, "x", adjustedX);
+    updateStyle(uniqueId, fieldName, "y", adjustedY);
   };
 
   return (
@@ -139,12 +146,16 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                     key={`${template.uniqueId}-${field.name}`}
                     bounds="parent"
                     onDrag={(e, data) => handleDrag(e, data, template.uniqueId, field.name)}
+                    defaultPosition={{
+                      x: field.x * scaleFactor,
+                      y: field.y * scaleFactor,
+                    }}
                   >
                     <div
                       style={{
                         position: "absolute",
-                        left: `${field.x}px`,
-                        top: `${field.y}px`,
+                        left: `${customizations[template.uniqueId]?.[field.name]?.x * scaleFactor || field.x * scaleFactor}px`,
+                        top: `${customizations[template.uniqueId]?.[field.name]?.y * scaleFactor || field.y * scaleFactor}px`,
                         fontSize: customizations[template.uniqueId]?.[field.name]?.fontSize || field.fontSize,
                         color: customizations[template.uniqueId]?.[field.name]?.color || field.color,
                         fontFamily: customizations[template.uniqueId]?.[field.name]?.font || "Arial",
@@ -212,15 +223,8 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
         </div>
       </section>
 
-      {/* Save Button */}
-      <div className="text-center mt-8">
-        <button
-          onClick={() => console.log("Customizations saved for:", customizations)}
-          className="px-8 py-4 bg-gradient-to-r from-green-500 to-teal-500 text-white rounded-lg font-bold text-xl hover:opacity-90 transition-all"
-        >
-          Save Customizations
-        </button>
-      </div>
+      {/* PDF Preview Button */}
+      <PDFPreview selectedTemplates={selectedTemplates} customizations={customizations} positions={draggingPosition} />
     </div>
   );
 };

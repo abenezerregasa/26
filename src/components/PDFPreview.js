@@ -1,7 +1,7 @@
 import React from "react";
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument, rgb, StandardFonts } from "pdf-lib";
 
-const PDFPreview = ({ selectedTemplates, customizations, positions }) => {
+const PDFPreview = ({ selectedTemplates, customizations }) => {
   const generatePDF = async () => {
     try {
       const pdfDoc = await PDFDocument.create();
@@ -10,9 +10,22 @@ const PDFPreview = ({ selectedTemplates, customizations, positions }) => {
         const page = pdfDoc.addPage([800, 600]);
         const { width, height } = page.getSize();
 
-        // Add Template Image
-        const imgBytes = await fetch(template.url).then((res) => res.arrayBuffer());
-        const img = await pdfDoc.embedJpg(imgBytes);
+        // Fetch Template Image and Embed
+        const response = await fetch(template.url);
+        const imgBytes = await response.arrayBuffer();
+        let img;
+
+        const contentType = response.headers.get("content-type");
+        if (contentType === "image/png") {
+          img = await pdfDoc.embedPng(imgBytes);
+        } else if (contentType === "image/jpeg" || template.url.endsWith(".jpg") || template.url.endsWith(".jpeg")) {
+          img = await pdfDoc.embedJpg(imgBytes);
+        } else {
+          console.error("Unsupported image format:", contentType);
+          continue; // Skip this template if the image format isn't supported
+        }
+
+        // Add Image to PDF Page
         const imgWidth = width - 100;
         const imgHeight = (imgWidth * img.height) / img.width;
         page.drawImage(img, {
@@ -23,20 +36,24 @@ const PDFPreview = ({ selectedTemplates, customizations, positions }) => {
         });
 
         // Add Custom Text Overlays
-        const custom = customizations[template.id] || {};
-        page.drawText(custom.text || "", {
-          x: positions[template.id]?.x || 100,
-          y: positions[template.id]?.y || 400,
-          size: parseInt(custom.fontSize) || 16,
-          font: pdfDoc.getFont("Helvetica"),
-          color: custom.color
-            ? rgb(
-                parseInt(custom.color.slice(1, 3), 16) / 255,
-                parseInt(custom.color.slice(3, 5), 16) / 255,
-                parseInt(custom.color.slice(5, 7), 16) / 255
-              )
-            : rgb(0, 0, 0),
-        });
+        const customFields = customizations[template.uniqueId] || {};
+        for (const [fieldName, custom] of Object.entries(customFields)) {
+          page.drawText(custom.text || "", {
+            x: custom.x || 100,
+            y: custom.y || 400,
+            size: parseInt(custom.fontSize, 10) || 16,
+            font: await pdfDoc.embedFont(StandardFonts.Helvetica),
+            color: custom.color
+              ? rgb(
+                  parseInt(custom.color.slice(1, 3), 16) / 255,
+                  parseInt(custom.color.slice(3, 5), 16) / 255,
+                  parseInt(custom.color.slice(5, 7), 16) / 255
+                )
+              : rgb(0, 0, 0),
+            fontWeight: custom.bold ? "bold" : "normal",
+            fontStyle: custom.italic ? "italic" : "normal",
+          });
+        }
       }
 
       const pdfBytes = await pdfDoc.save();
