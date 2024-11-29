@@ -25,6 +25,16 @@ const AutoSuggestion = ({ onSuggestionSelect }) => {
             setSuggestions(response.data);
           } catch (error) {
             console.error("Error fetching suggestions:", error);
+
+            // Handle errors gracefully
+            if (error.response && error.response.status === 500) {
+              alert("Server error: Failed to fetch suggestions.");
+            } else if (error.response && error.response.status === 404) {
+              alert("No suggestions found for this keyword.");
+            } else {
+              alert("An unexpected error occurred. Please try again.");
+            }
+
             setSuggestions([]);
           } finally {
             setIsLoading(false);
@@ -60,7 +70,11 @@ const AutoSuggestion = ({ onSuggestionSelect }) => {
         placeholder="Enter model name..."
         className="w-full p-2 border border-gray-300 rounded"
       />
-      {isLoading && <div className="absolute right-2 top-2 text-gray-500">Loading...</div>}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-50 z-20">
+          <div className="spinner-border animate-spin inline-block w-8 h-8 border-4 rounded-full text-blue-600"></div>
+        </div>
+      )}
       {suggestions.length > 0 && (
         <ul className="absolute z-10 w-full bg-white border border-gray-300 rounded mt-1 max-h-48 overflow-y-auto">
           {suggestions.map((suggestion) => (

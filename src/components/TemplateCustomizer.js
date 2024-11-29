@@ -1,4 +1,3 @@
-// TemplateCustomizer.js
 import React, { useState, useEffect, useCallback } from "react";
 import Draggable from "react-draggable";
 import PredefinedPositions from "./PredefinedPositions";
@@ -37,18 +36,16 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       ...prev,
       [uniqueId]: {
         ...prev[uniqueId],
-        model: suggestion.model,
-        storage: suggestion.storage,
-        display: suggestion.display,
-        grado: suggestion.grado,
-        ram: suggestion.ram,
-        cpu: suggestion.cpu,
-        ssd: suggestion.ssd,
-        graphics: suggestion.graphics,
-        codice: suggestion.codice,
-        price: suggestion.price,
+        ...suggestion, // Dynamically add all suggestion keys
       },
     }));
+
+    Object.keys(suggestion).forEach((key) => {
+      const inputField = document.querySelector(`input[name="${key}"][data-unique-id="${uniqueId}"]`);
+      if (inputField) {
+        inputField.value = suggestion[key] || "";
+      }
+    });
   };
 
   const updateStyle = (uniqueId, fieldName, property, value) => {
@@ -195,7 +192,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
               <div className="mt-4 space-y-4">
                 <AutoSuggestion
                   templateId={template.uniqueId}
-                  handleSuggestionSelect={handleSuggestionSelect}
+                  onSuggestionSelect={(suggestion) => handleSuggestionSelect(template.uniqueId, suggestion)}
                 />
 
                 {(predefinedPositions[template.type] || []).map((field) => (
@@ -205,9 +202,11 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                     </label>
                     <input
                       type="text"
+                      name={field.name} // Use the field name as the input's name
                       placeholder={`Enter ${field.name}`}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                       value={customizations[template.uniqueId]?.[field.name]?.text || ""}
+                      data-unique-id={template.uniqueId} // Add unique ID for scoping
                       onChange={(e) =>
                         handleInputChange(template.uniqueId, field.name, {
                           ...customizations[template.uniqueId]?.[field.name],
@@ -250,7 +249,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       </section>
 
       {/* PDF Preview Button */}
-      <PDFPreview selectedTemplates={selectedTemplates} customizations={customizations} positions={draggingPosition} />
+      <PDFPreview selectedTemplates={selectedTemplates} customizations={customizations} />
     </div>
   );
 };

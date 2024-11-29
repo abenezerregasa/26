@@ -98,6 +98,14 @@ const FontSelector = ({
         className="w-16 h-10 p-0 border border-gray-300 rounded-lg"
       />
 
+<input
+  type="number"
+  value={currentSize}
+  onChange={handleFontSizeInput}
+  className="w-16 text-center px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:outline-none"
+/>
+
+
       {/* Bold Toggle */}
       <button
         onClick={() => onBoldChange(!selectedFont.bold)}

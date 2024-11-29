@@ -1,88 +1,160 @@
 import React, { useState } from "react";
-import Modal from "react-modal"; // Modal for PDF preview
-import { PDFDocument, rgb } from "pdf-lib"; // For PDF manipulation
+import Modal from "react-modal";
+import { PDFDocument, rgb } from "pdf-lib";
 
-Modal.setAppElement("#root"); // Attach modal to the app root
+Modal.setAppElement("#root");
 
-const PDFPreview = ({ selectedTemplates, customizations }) => {
+const PDFPreview = ({ selectedTemplates }) => {
   const [modalIsOpen, setModalIsOpen] = useState(false);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
 
-  // Function to merge template with overlay using canvas
+  // Function to merge image and overlay
   const mergeImageWithOverlay = async (template) => {
     return new Promise((resolve, reject) => {
-      try {
-        const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d");
 
-        const image = new Image();
-        image.crossOrigin = "Anonymous"; // Avoid CORS issues
-        image.src = template.url;
+      const image = new Image();
+      image.crossOrigin = "Anonymous";
+      image.src = template.url;
 
-        image.onload = () => {
-          // Set canvas dimensions to match the image
-          canvas.width = image.width;
-          canvas.height = image.height;
+      image.onload = () => {
+        canvas.width = image.width;
+        canvas.height = image.height;
 
-          // Draw the base template image onto the canvas
-          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/png"));
+      };
 
-          // Draw overlay text based on customizations
-          const customFields = customizations[template.uniqueId] || {};
-          Object.entries(customFields).forEach(([fieldName, field]) => {
-            if (field.text) {
-              context.font = `${field.fontSize}px ${field.fontFamily || "Arial"}`;
-              context.fillStyle = field.color || "#000000";
-              context.fillText(field.text, field.x || 0, field.y || 0);
-            }
-          });
-
-          // Convert canvas to an image
-          const mergedImageUrl = canvas.toDataURL("image/png");
-          resolve(mergedImageUrl);
-        };
-
-        image.onerror = (error) => {
-          console.error("Error loading image:", error);
-          reject(error);
-        };
-      } catch (error) {
-        console.error("Error merging image with overlay:", error);
-        reject(error);
-      }
+      image.onerror = (error) => reject(error);
     });
   };
 
-  // Generate PDF with the merged images
+  // Function to draw grid separation lines
+  const drawGridLines = (page, gridSize, cellWidth, cellHeight) => {
+    const lineColor = rgb(0.7, 0.7, 0.7); // Light gray line for separation
+
+    // Draw vertical lines
+    for (let i = 1; i < gridSize.cols; i++) {
+      page.drawLine({
+        start: { x: i * cellWidth, y: 0 },
+        end: { x: i * cellWidth, y: page.getHeight() },
+        thickness: 0.5,
+        color: lineColor,
+      });
+    }
+
+    // Draw horizontal lines
+    for (let i = 1; i < gridSize.rows; i++) {
+      page.drawLine({
+        start: { x: 0, y: i * cellHeight },
+        end: { x: page.getWidth(), y: i * cellHeight },
+        thickness: 0.5,
+        color: lineColor,
+      });
+    }
+  };
+
+  // Generate PDF
   const generatePDF = async () => {
     try {
       const pdfDoc = await PDFDocument.create();
 
-      for (const template of selectedTemplates) {
-        const mergedImageUrl = await mergeImageWithOverlay(template);
-        const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
+      // Separate templates by type
+      const smartphoneTemplates = selectedTemplates.filter((t) => t.type === "smartphone");
+      const squareTemplates = selectedTemplates.filter((t) => t.type === "square");
+      const rectangularTemplates = selectedTemplates.filter((t) => t.type === "rectangular");
 
-        let img;
-        if (mergedImageUrl.includes("image/png")) {
-          img = await pdfDoc.embedPng(imgBytes);
-        } else {
-          img = await pdfDoc.embedJpg(imgBytes);
+      // Add smartphone templates in 2x2 grid
+      if (smartphoneTemplates.length > 0) {
+        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
+        const gridSize = { cols: 2, rows: 2, cellWidth: 297.64, cellHeight: 420.945 }; // 2x2 grid
+
+        for (let i = 0; i < 4; i++) {
+          const template = smartphoneTemplates[i];
+
+          if (template) {
+            const mergedImageUrl = await mergeImageWithOverlay(template);
+            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
+            const img = await pdfDoc.embedPng(imgBytes);
+
+            const col = i % gridSize.cols;
+            const row = Math.floor(i / gridSize.cols);
+
+            currentPage.drawImage(img, {
+              x: col * gridSize.cellWidth,
+              y: currentPage.getHeight() - (row + 1) * gridSize.cellHeight,
+              width: gridSize.cellWidth,
+              height: gridSize.cellHeight,
+            });
+          }
         }
 
-        const page = pdfDoc.addPage([img.width, img.height]);
-        page.drawImage(img, {
-          x: 0,
-          y: 0,
-          width: img.width,
-          height: img.height,
-        });
+        // Add grid separation lines
+        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
       }
 
+      // Add square templates in 2x2 grid (same as smartphone)
+      if (squareTemplates.length > 0) {
+        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
+        const gridSize = { cols: 2, rows: 2, cellWidth: 297.64, cellHeight: 420.945 }; // 2x2 grid
+
+        for (let i = 0; i < 4; i++) {
+          const template = squareTemplates[i];
+
+          if (template) {
+            const mergedImageUrl = await mergeImageWithOverlay(template);
+            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
+            const img = await pdfDoc.embedPng(imgBytes);
+
+            const col = i % gridSize.cols;
+            const row = Math.floor(i / gridSize.cols);
+
+            currentPage.drawImage(img, {
+              x: col * gridSize.cellWidth,
+              y: currentPage.getHeight() - (row + 1) * gridSize.cellHeight,
+              width: gridSize.cellWidth,
+              height: gridSize.cellHeight,
+            });
+          }
+        }
+
+        // Add grid separation lines
+        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
+      }
+
+      // Add rectangular templates in 4x1 grid (stacked vertically)
+      if (rectangularTemplates.length > 0) {
+        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
+        const gridSize = { cols: 1, rows: 4, cellWidth: 595.28, cellHeight: 210.4725 }; // 4x1 grid, stacked vertically
+
+        for (let i = 0; i < 4; i++) {
+          const template = rectangularTemplates[i];
+
+          if (template) {
+            const mergedImageUrl = await mergeImageWithOverlay(template);
+            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
+            const img = await pdfDoc.embedPng(imgBytes);
+
+            currentPage.drawImage(img, {
+              x: 0,
+              y: (gridSize.rows - 1 - i) * gridSize.cellHeight, // Stack vertically
+              width: gridSize.cellWidth,
+              height: gridSize.cellHeight,
+            });
+          }
+        }
+
+        // Add grid separation lines
+        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
+      }
+
+      // Save and show the PDF
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       setPdfDataUrl(url);
-      setModalIsOpen(true); // Open modal for PDF preview
+      setModalIsOpen(true);
     } catch (error) {
       console.error("Error generating PDF:", error);
     }
@@ -102,7 +174,6 @@ const PDFPreview = ({ selectedTemplates, customizations }) => {
         Preview PDF
       </button>
 
-      {/* Modal for PDF Preview */}
       <Modal
         isOpen={modalIsOpen}
         onRequestClose={closeModal}
