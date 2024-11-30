@@ -1,155 +1,74 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import Modal from "react-modal";
-import { PDFDocument, rgb } from "pdf-lib";
+import { toPng } from "html-to-image"; // Importing toPng for capturing images
+import { PDFDocument } from "pdf-lib";
 
 Modal.setAppElement("#root");
 
-const PDFPreview = ({ selectedTemplates }) => {
+const PDFPreview = ({ selectedTemplates = [] }) => {
   const [modalIsOpen, setModalIsOpen] = useState(false);
   const [pdfDataUrl, setPdfDataUrl] = useState(null);
+  const gridRef = useRef(null);
 
-  // Function to merge image and overlay
-  const mergeImageWithOverlay = async (template) => {
-    return new Promise((resolve, reject) => {
-      const canvas = document.createElement("canvas");
-      const context = canvas.getContext("2d");
-
-      const image = new Image();
-      image.crossOrigin = "Anonymous";
-      image.src = template.url;
-
-      image.onload = () => {
-        canvas.width = image.width;
-        canvas.height = image.height;
-
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/png"));
-      };
-
-      image.onerror = (error) => reject(error);
-    });
-  };
-
-  // Function to draw grid separation lines
-  const drawGridLines = (page, gridSize, cellWidth, cellHeight) => {
-    const lineColor = rgb(0.7, 0.7, 0.7); // Light gray line for separation
-
-    // Draw vertical lines
-    for (let i = 1; i < gridSize.cols; i++) {
-      page.drawLine({
-        start: { x: i * cellWidth, y: 0 },
-        end: { x: i * cellWidth, y: page.getHeight() },
-        thickness: 0.5,
-        color: lineColor,
-      });
-    }
-
-    // Draw horizontal lines
-    for (let i = 1; i < gridSize.rows; i++) {
-      page.drawLine({
-        start: { x: 0, y: i * cellHeight },
-        end: { x: page.getWidth(), y: i * cellHeight },
-        thickness: 0.5,
-        color: lineColor,
-      });
+  // Capture the image and overlay (without input fields)
+  const captureTemplateImage = async (container) => {
+    try {
+      const imageSection = container.querySelector(".template-image")?.parentElement;
+      if (imageSection) {
+        return await toPng(imageSection);
+      }
+      throw new Error("Image section not found!");
+    } catch (error) {
+      console.error("Error capturing template image:", error);
+      return null;
     }
   };
 
-  // Generate PDF
+  // Generate the PDF
   const generatePDF = async () => {
+    if (!gridRef.current) return;
+
     try {
       const pdfDoc = await PDFDocument.create();
+      const containers = gridRef.current.querySelectorAll(".template-container");
+      const images = [];
 
-      // Separate templates by type
-      const smartphoneTemplates = selectedTemplates.filter((t) => t.type === "smartphone");
-      const squareTemplates = selectedTemplates.filter((t) => t.type === "square");
-      const rectangularTemplates = selectedTemplates.filter((t) => t.type === "rectangular");
-
-      // Add smartphone templates in 2x2 grid
-      if (smartphoneTemplates.length > 0) {
-        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
-        const gridSize = { cols: 2, rows: 2, cellWidth: 297.64, cellHeight: 420.945 }; // 2x2 grid
-
-        for (let i = 0; i < 4; i++) {
-          const template = smartphoneTemplates[i];
-
-          if (template) {
-            const mergedImageUrl = await mergeImageWithOverlay(template);
-            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
-            const img = await pdfDoc.embedPng(imgBytes);
-
-            const col = i % gridSize.cols;
-            const row = Math.floor(i / gridSize.cols);
-
-            currentPage.drawImage(img, {
-              x: col * gridSize.cellWidth,
-              y: currentPage.getHeight() - (row + 1) * gridSize.cellHeight,
-              width: gridSize.cellWidth,
-              height: gridSize.cellHeight,
-            });
-          }
-        }
-
-        // Add grid separation lines
-        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
+      // Capture images with overlays
+      for (const container of containers) {
+        const image = await captureTemplateImage(container);
+        if (image) images.push(image);
       }
 
-      // Add square templates in 2x2 grid (same as smartphone)
-      if (squareTemplates.length > 0) {
-        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
-        const gridSize = { cols: 2, rows: 2, cellWidth: 297.64, cellHeight: 420.945 }; // 2x2 grid
-
-        for (let i = 0; i < 4; i++) {
-          const template = squareTemplates[i];
-
-          if (template) {
-            const mergedImageUrl = await mergeImageWithOverlay(template);
-            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
-            const img = await pdfDoc.embedPng(imgBytes);
-
-            const col = i % gridSize.cols;
-            const row = Math.floor(i / gridSize.cols);
-
-            currentPage.drawImage(img, {
-              x: col * gridSize.cellWidth,
-              y: currentPage.getHeight() - (row + 1) * gridSize.cellHeight,
-              width: gridSize.cellWidth,
-              height: gridSize.cellHeight,
-            });
-          }
-        }
-
-        // Add grid separation lines
-        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
+      if (images.length === 0) {
+        alert("No templates selected for preview.");
+        return;
       }
 
-      // Add rectangular templates in 4x1 grid (stacked vertically)
-      if (rectangularTemplates.length > 0) {
-        let currentPage = pdfDoc.addPage([595.28, 841.89]); // A4 size
-        const gridSize = { cols: 1, rows: 4, cellWidth: 595.28, cellHeight: 210.4725 }; // 4x1 grid, stacked vertically
+      // Add images to the PDF
+      for (let i = 0; i < images.length; i++) {
+        const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
+        const imgBytes = await fetch(images[i]).then((res) => res.arrayBuffer());
+        const img = await pdfDoc.embedPng(imgBytes);
 
-        for (let i = 0; i < 4; i++) {
-          const template = rectangularTemplates[i];
+        // Fit the image into the page (centered, maintaining aspect ratio)
+        const width = page.getWidth();
+        const height = page.getHeight();
+        const imgWidth = img.width;
+        const imgHeight = img.height;
 
-          if (template) {
-            const mergedImageUrl = await mergeImageWithOverlay(template);
-            const imgBytes = await fetch(mergedImageUrl).then((res) => res.arrayBuffer());
-            const img = await pdfDoc.embedPng(imgBytes);
+        const scale = Math.min(width / imgWidth, height / imgHeight);
+        const scaledWidth = imgWidth * scale;
+        const scaledHeight = imgHeight * scale;
 
-            currentPage.drawImage(img, {
-              x: 0,
-              y: (gridSize.rows - 1 - i) * gridSize.cellHeight, // Stack vertically
-              width: gridSize.cellWidth,
-              height: gridSize.cellHeight,
-            });
-          }
-        }
-
-        // Add grid separation lines
-        drawGridLines(currentPage, gridSize, gridSize.cellWidth, gridSize.cellHeight);
+        page.drawImage(img, {
+          x: (width - scaledWidth) / 2,
+          y: (height - scaledHeight) / 2,
+          width: scaledWidth,
+          height: scaledHeight,
+        });
       }
 
-      // Save and show the PDF
+      // Save the PDF
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
@@ -166,14 +85,51 @@ const PDFPreview = ({ selectedTemplates }) => {
   };
 
   return (
-    <div className="text-center mt-8">
+    <div>
+      {/* Grid for templates */}
+      <div ref={gridRef} className="grid grid-cols-2 gap-6 max-w-7xl mx-auto">
+        {selectedTemplates.map((template, index) => (
+          <div
+            key={index}
+            className="p-4 bg-white shadow rounded relative template-container"
+          >
+            <h3 className="text-center">{template.name}</h3>
+            <div className="relative">
+              <img
+                src={template.url}
+                alt={template.name}
+                className="w-full h-auto border rounded mb-4 template-image"
+                onError={(e) => (e.target.src = "https://via.placeholder.com/150")}
+              />
+              {/* Overlay text dynamically added */}
+              {template.fields?.map((field, i) => (
+                <div
+                  key={i}
+                  className="absolute"
+                  style={{
+                    top: `${field.y}px`,
+                    left: `${field.x}px`,
+                    fontSize: `${field.fontSize || 12}px`,
+                    color: field.color || "#000",
+                  }}
+                >
+                  {field.value || ""}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Preview PDF button */}
       <button
         onClick={generatePDF}
-        className="px-8 py-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-lg font-bold text-xl hover:opacity-90 transition-all"
+        className="fixed bottom-4 right-4 bg-blue-500 text-white px-4 py-2 rounded shadow"
       >
         Preview PDF
       </button>
 
+      {/* Modal for displaying PDF */}
       <Modal
         isOpen={modalIsOpen}
         onRequestClose={closeModal}
