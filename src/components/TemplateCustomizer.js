@@ -1,16 +1,24 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import Draggable from "react-draggable";
 import PredefinedPositions from "./PredefinedPositions";
 import FontSelector from "./FontSelector";
-import PDFPreview from "./PDFPreview"; // Import PDFPreview
-import AutoSuggestion from "./AutoSuggestion"; // Import AutoSuggestion
+import AutoSuggestion from "./AutoSuggestion";
+import Modal from "react-modal";
+import { toPng } from "html-to-image";
+import { PDFDocument } from "pdf-lib";
+
+Modal.setAppElement("#root");
 
 const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   const [customizations, setCustomizations] = useState({});
   const [draggingPosition, setDraggingPosition] = useState({ x: 0, y: 0 });
-  const [currentField, setCurrentField] = useState(null); // Keep track of the currently dragged field
+  const [currentField, setCurrentField] = useState(null);
+  const [pdfDataUrl, setPdfDataUrl] = useState(null);
+  const [modalIsOpen, setModalIsOpen] = useState(false);
+
   const predefinedPositions = PredefinedPositions();
   const scaleFactor = 0.5;
+  const gridRef = useRef(null);
 
   useEffect(() => {
     // Load fonts dynamically from Google Fonts
@@ -27,7 +35,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   const handleInputChange = useCallback((uniqueId, field, value) => {
     setCustomizations((prev) => ({
       ...prev,
-      [uniqueId]: { ...prev[uniqueId], [field]: value },
+      [uniqueId]: { ...prev[uniqueId], [field]: { ...prev[uniqueId]?.[field], text: value } },
     }));
   }, []);
 
@@ -36,7 +44,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       ...prev,
       [uniqueId]: {
         ...prev[uniqueId],
-        ...suggestion, // Dynamically add all suggestion keys
+        ...suggestion,
       },
     }));
 
@@ -80,26 +88,117 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
     setDraggingPosition({ x: adjustedX, y: adjustedY });
     setCurrentField({ uniqueId, fieldName });
 
-    // Update the customizations state to reflect the new dragging position
     updateStyle(uniqueId, fieldName, "x", adjustedX);
     updateStyle(uniqueId, fieldName, "y", adjustedY);
   };
 
+  const previewPDF = async () => {
+  if (!gridRef.current) {
+    alert("No templates selected for preview.");
+    return;
+  }
+
+  try {
+    const pdfDoc = await PDFDocument.create();
+
+    const A4_WIDTH = 595.28; // A4 width in points
+    const A4_HEIGHT = 841.89; // A4 height in points
+
+    // Separate templates by type
+    const squareTemplates = selectedTemplates.filter((t) => t.type === "square");
+    const smartphoneTemplates = selectedTemplates.filter((t) => t.type === "smartphone");
+    const rectangularTemplates = selectedTemplates.filter((t) => t.type === "rectangular");
+
+    // Function to fetch and embed images
+    const fetchImageBytes = async (container) => {
+      try {
+        const imageDataUrl = await toPng(container, { cacheBust: true });
+        const imgBytes = await fetch(imageDataUrl).then((res) => res.arrayBuffer());
+        return imgBytes;
+      } catch (error) {
+        console.error("Error capturing template:", error);
+        return null;
+      }
+    };
+
+    // Function to draw templates in a grid
+    const drawGrid = async (templates, columns, rows, pageWidth, pageHeight) => {
+      const cellWidth = pageWidth / columns;
+      const cellHeight = pageHeight / rows;
+
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+
+      for (const [index, template] of templates.entries()) {
+        const col = index % columns;
+        const row = Math.floor(index / columns);
+
+        const x = col * cellWidth;
+        const y = pageHeight - (row + 1) * cellHeight;
+
+        const container = document.querySelector(`.template-row[data-id="${template.uniqueId}"]`);
+        if (!container) continue;
+
+        const imgBytes = await fetchImageBytes(container);
+        if (!imgBytes) continue;
+
+        const img = await pdfDoc.embedPng(imgBytes);
+        const imgWidth = img.width;
+        const imgHeight = img.height;
+
+        // Scale to fit the cell
+        const scale = Math.min(cellWidth / imgWidth, cellHeight / imgHeight);
+        const scaledWidth = imgWidth * scale;
+        const scaledHeight = imgHeight * scale;
+
+        page.drawImage(img, {
+          x: x + (cellWidth - scaledWidth) / 2,
+          y: y + (cellHeight - scaledHeight) / 2,
+          width: scaledWidth,
+          height: scaledHeight,
+        });
+      }
+    };
+
+    // Draw square and smartphone templates in a 2x2 grid
+    if (squareTemplates.length > 0 || smartphoneTemplates.length > 0) {
+      await drawGrid([...squareTemplates, ...smartphoneTemplates], 2, 2, A4_WIDTH, A4_HEIGHT);
+    }
+
+    // Draw rectangular templates in a 3x1 grid (landscape)
+    if (rectangularTemplates.length > 0) {
+      await drawGrid(rectangularTemplates, 3, 1, A4_HEIGHT, A4_WIDTH); // Landscape
+    }
+
+    // Save and open the PDF
+    const pdfBytes = await pdfDoc.save();
+    const blob = new Blob([pdfBytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    setPdfDataUrl(url);
+    setModalIsOpen(true);
+  } catch (error) {
+    console.error("Error previewing PDF:", error);
+  }
+};
+
+  
+
+  const closeModal = () => {
+    setModalIsOpen(false);
+    setPdfDataUrl(null);
+  };
+
   return (
     <div className="flex flex-col min-h-screen">
-      {/* Header */}
       <h2 className="text-3xl font-bold text-center mb-8 text-gray-800">
         Customize Your Templates
       </h2>
 
-      {/* Real-Time Position Counter */}
       {currentField && (
         <div className="fixed bottom-2 right-2 bg-gray-700 text-white text-sm px-4 py-2 rounded-lg z-50">
           {`Label: ${currentField.fieldName}, Position: X: ${draggingPosition.x}, Y: ${draggingPosition.y}`}
         </div>
       )}
 
-      {/* Template Section */}
       <section
         className="flex-grow bg-gray-100 px-4 py-8 overflow-y-auto"
         style={{
@@ -107,16 +206,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
           maxHeight: "calc(100vh - 200px)",
         }}
       >
-        <div
-          className="grid"
-          style={{
-            gridTemplateColumns: "repeat(2, 1fr)",
-            rowGap: "1000px",
-            columnGap: "32px",
-            alignItems: "center",
-            justifyItems: "center",
-          }}
-        >
+        <div ref={gridRef} className="grid grid-cols-2 gap-4">
           {selectedTemplates.map((template) => (
             <div
               key={template.uniqueId}
@@ -125,29 +215,13 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                 ...getGridStyle(template.type),
               }}
             >
-              {/* Remove Template Button */}
               <button
                 onClick={() => onRemoveTemplate(template.uniqueId)}
                 className="absolute top-2 right-2 px-3 py-1 flex items-center gap-2 bg-red-600 text-white font-medium rounded-md shadow hover:bg-red-700 hover:shadow-lg transition duration-300"
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={2}
-                  stroke="currentColor"
-                  className="w-5 h-5"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M6 18L18 6M6 6l12 12"
-                  />
-                </svg>
                 Remove
               </button>
 
-              {/* Template Preview */}
               <div
                 className="relative w-full h-full rounded-md overflow-hidden"
                 style={{
@@ -159,7 +233,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                   alt={template.template_name}
                   className="w-full h-full object-contain"
                 />
-                {(predefinedPositions[template.type] || []).map((field) => (
+                {predefinedPositions[template.type]?.map((field) => (
                   <Draggable
                     key={`${template.uniqueId}-${field.name}`}
                     bounds="parent"
@@ -188,34 +262,28 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
                 ))}
               </div>
 
-              {/* Input Fields with Font Controls */}
               <div className="mt-4 space-y-4">
                 <AutoSuggestion
                   templateId={template.uniqueId}
                   onSuggestionSelect={(suggestion) => handleSuggestionSelect(template.uniqueId, suggestion)}
                 />
 
-                {(predefinedPositions[template.type] || []).map((field) => (
+                {predefinedPositions[template.type]?.map((field) => (
                   <div key={field.name} className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700">
                       {field.name}
                     </label>
                     <input
                       type="text"
-                      name={field.name} // Use the field name as the input's name
+                      name={field.name}
                       placeholder={`Enter ${field.name}`}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg"
                       value={customizations[template.uniqueId]?.[field.name]?.text || ""}
-                      data-unique-id={template.uniqueId} // Add unique ID for scoping
+                      data-unique-id={template.uniqueId}
                       onChange={(e) =>
-                        handleInputChange(template.uniqueId, field.name, {
-                          ...customizations[template.uniqueId]?.[field.name],
-                          text: e.target.value,
-                        })
+                        handleInputChange(template.uniqueId, field.name, e.target.value)
                       }
                     />
-
-                    {/* Font Customization */}
                     <FontSelector
                       selectedFont={{
                         type: customizations[template.uniqueId]?.[field.name]?.font || "",
@@ -248,8 +316,55 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
         </div>
       </section>
 
-      {/* PDF Preview Button */}
-      <PDFPreview selectedTemplates={selectedTemplates} customizations={customizations} />
+      <button
+        onClick={previewPDF}
+        className="mt-8 px-6 py-3 bg-blue-600 text-white rounded-lg"
+      >
+        Preview PDF
+      </button>
+
+      <Modal
+        isOpen={modalIsOpen}
+        onRequestClose={closeModal}
+        contentLabel="PDF Preview"
+        style={{
+          content: {
+            top: "50%",
+            left: "50%",
+            right: "auto",
+            bottom: "auto",
+            marginRight: "-50%",
+            transform: "translate(-50%, -50%)",
+            width: "80%",
+            height: "80%",
+          },
+          overlay: {
+            backgroundColor: "rgba(0, 0, 0, 0.75)",
+          },
+        }}
+      >
+        <div className="flex flex-col h-full">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-bold">PDF Preview</h2>
+            <button
+              onClick={closeModal}
+              className="text-white bg-red-600 px-4 py-2 rounded hover:bg-red-700"
+            >
+              Close
+            </button>
+          </div>
+          {pdfDataUrl ? (
+            <iframe
+              src={pdfDataUrl}
+              title="PDF Preview"
+              className="flex-grow w-full"
+              style={{ border: "none" }}
+            />
+          ) : (
+            <p>Loading PDF...</p>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

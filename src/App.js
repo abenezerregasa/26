@@ -17,11 +17,16 @@ const App = () => {
   };
 
   const handleTemplateAdd = (template) => {
-    setSelectedTemplates((prev) => [...prev, { ...template, uniqueId: Date.now() }]);
+    setSelectedTemplates((prev) => [
+      ...prev,
+      { ...template, uniqueId: `${Date.now()}-${Math.random()}` }, // Ensure unique ID
+    ]);
   };
 
   const handleTemplateRemove = (uniqueId) => {
-    setSelectedTemplates((prev) => prev.filter((template) => template.uniqueId !== uniqueId));
+    setSelectedTemplates((prev) =>
+      prev.filter((template) => template.uniqueId !== uniqueId)
+    );
   };
 
   const goToCustomization = () => {
