@@ -93,94 +93,45 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
   };
 
   const previewPDF = async () => {
-  if (!gridRef.current) {
-    alert("No templates selected for preview.");
-    return;
-  }
+    if (!gridRef.current) {
+      alert("No templates selected for preview.");
+      return;
+    }
 
-  try {
-    const pdfDoc = await PDFDocument.create();
+    try {
+      const pdfDoc = await PDFDocument.create();
+      const containers = gridRef.current.querySelectorAll(".template-row");
 
-    const A4_WIDTH = 595.28; // A4 width in points
-    const A4_HEIGHT = 841.89; // A4 height in points
-
-    // Separate templates by type
-    const squareTemplates = selectedTemplates.filter((t) => t.type === "square");
-    const smartphoneTemplates = selectedTemplates.filter((t) => t.type === "smartphone");
-    const rectangularTemplates = selectedTemplates.filter((t) => t.type === "rectangular");
-
-    // Function to fetch and embed images
-    const fetchImageBytes = async (container) => {
-      try {
+      for (const container of containers) {
         const imageDataUrl = await toPng(container, { cacheBust: true });
         const imgBytes = await fetch(imageDataUrl).then((res) => res.arrayBuffer());
-        return imgBytes;
-      } catch (error) {
-        console.error("Error capturing template:", error);
-        return null;
-      }
-    };
-
-    // Function to draw templates in a grid
-    const drawGrid = async (templates, columns, rows, pageWidth, pageHeight) => {
-      const cellWidth = pageWidth / columns;
-      const cellHeight = pageHeight / rows;
-
-      const page = pdfDoc.addPage([pageWidth, pageHeight]);
-
-      for (const [index, template] of templates.entries()) {
-        const col = index % columns;
-        const row = Math.floor(index / columns);
-
-        const x = col * cellWidth;
-        const y = pageHeight - (row + 1) * cellHeight;
-
-        const container = document.querySelector(`.template-row[data-id="${template.uniqueId}"]`);
-        if (!container) continue;
-
-        const imgBytes = await fetchImageBytes(container);
-        if (!imgBytes) continue;
-
         const img = await pdfDoc.embedPng(imgBytes);
+
+        const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
         const imgWidth = img.width;
         const imgHeight = img.height;
 
-        // Scale to fit the cell
-        const scale = Math.min(cellWidth / imgWidth, cellHeight / imgHeight);
+        const scale = Math.min(page.getWidth() / imgWidth, page.getHeight() / imgHeight);
         const scaledWidth = imgWidth * scale;
         const scaledHeight = imgHeight * scale;
 
         page.drawImage(img, {
-          x: x + (cellWidth - scaledWidth) / 2,
-          y: y + (cellHeight - scaledHeight) / 2,
+          x: (page.getWidth() - scaledWidth) / 2,
+          y: (page.getHeight() - scaledHeight) / 2,
           width: scaledWidth,
           height: scaledHeight,
         });
       }
-    };
 
-    // Draw square and smartphone templates in a 2x2 grid
-    if (squareTemplates.length > 0 || smartphoneTemplates.length > 0) {
-      await drawGrid([...squareTemplates, ...smartphoneTemplates], 2, 2, A4_WIDTH, A4_HEIGHT);
+      const pdfBytes = await pdfDoc.save();
+      const blob = new Blob([pdfBytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      setPdfDataUrl(url);
+      setModalIsOpen(true);
+    } catch (error) {
+      console.error("Error previewing PDF:", error);
     }
-
-    // Draw rectangular templates in a 3x1 grid (landscape)
-    if (rectangularTemplates.length > 0) {
-      await drawGrid(rectangularTemplates, 3, 1, A4_HEIGHT, A4_WIDTH); // Landscape
-    }
-
-    // Save and open the PDF
-    const pdfBytes = await pdfDoc.save();
-    const blob = new Blob([pdfBytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    setPdfDataUrl(url);
-    setModalIsOpen(true);
-  } catch (error) {
-    console.error("Error previewing PDF:", error);
-  }
-};
-
-  
+  };
 
   const closeModal = () => {
     setModalIsOpen(false);
