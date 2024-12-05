@@ -5,7 +5,7 @@ import FontSelector from "./FontSelector";
 import AutoSuggestion from "./AutoSuggestion";
 import Modal from "react-modal";
 import { toPng } from "html-to-image";
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument, rgb } from "pdf-lib";
 
 Modal.setAppElement("#root");
 
@@ -74,7 +74,7 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
       case "rectangular":
         return { width: `${1500 * scaleFactor}px`, height: `${500 * scaleFactor}px` };
       case "square":
-        return { width: `${1080 * scaleFactor}px`, height: `${1080 * scaleFactor}px` };
+        return { width: `${2480 * scaleFactor}px`, height: `${3508 * scaleFactor}px` };
       case "smartphone":
         return { width: `${1375 * scaleFactor}px`, height: `${1044 * scaleFactor}px` };
       default:
@@ -92,46 +92,112 @@ const TemplateCustomizer = ({ selectedTemplates, onRemoveTemplate }) => {
     updateStyle(uniqueId, fieldName, "y", adjustedY);
   };
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ 
+ 
   const previewPDF = async () => {
-    if (!gridRef.current) {
+    if (!selectedTemplates.length) {
       alert("No templates selected for preview.");
       return;
     }
-
+  
     try {
       const pdfDoc = await PDFDocument.create();
-      const containers = gridRef.current.querySelectorAll(".template-row");
-
-      for (const container of containers) {
-        const imageDataUrl = await toPng(container, { cacheBust: true });
-        const imgBytes = await fetch(imageDataUrl).then((res) => res.arrayBuffer());
+  
+      // A4 size in points (landscape orientation)
+      const pageWidth = 841.89;
+      const pageHeight = 595.28;
+  
+      // Grid configuration for a 2x2 layout
+      const cols = 2;
+      const rows = 2;
+      const cellWidth = pageWidth / cols;
+      const cellHeight = pageHeight / rows;
+  
+      const page = pdfDoc.addPage([pageWidth, pageHeight]);
+  
+      for (let i = 0; i < rows * cols; i++) {
+        const template = selectedTemplates[i];
+        if (!template) continue; // Skip empty slots
+  
+        // Query the DOM element for the template
+        const templateElement = document.querySelector(`[data-template-id="${template.uniqueId}"]`);
+        if (!templateElement) {
+          console.warn(`Template element not found for ID: ${template.uniqueId}`);
+          continue;
+        }
+  
+        // Capture the template preview as an image
+        const snapshotUrl = await toPng(templateElement, {
+          cacheBust: true,
+          quality: 1.0,
+          backgroundColor: "#FFFFFF", // Ensure a white background
+        });
+  
+        // Embed the captured image into the PDF
+        const imgBytes = await fetch(snapshotUrl).then((res) => res.arrayBuffer());
         const img = await pdfDoc.embedPng(imgBytes);
-
-        const page = pdfDoc.addPage([595.28, 841.89]); // A4 size
-        const imgWidth = img.width;
-        const imgHeight = img.height;
-
-        const scale = Math.min(page.getWidth() / imgWidth, page.getHeight() / imgHeight);
-        const scaledWidth = imgWidth * scale;
-        const scaledHeight = imgHeight * scale;
-
+  
+        // Calculate scaling to preserve aspect ratio
+        const imgAspectRatio = img.width / img.height;
+        let scaledWidth, scaledHeight;
+        if (cellWidth / cellHeight > imgAspectRatio) {
+          scaledHeight = cellHeight;
+          scaledWidth = scaledHeight * imgAspectRatio;
+        } else {
+          scaledWidth = cellWidth;
+          scaledHeight = scaledWidth / imgAspectRatio;
+        }
+  
+        // Position the image in its respective grid cell
+        const row = Math.floor(i / cols);
+        const col = i % cols;
+        const offsetX = col * cellWidth + (cellWidth - scaledWidth) / 2;
+        const offsetY = pageHeight - (row + 1) * cellHeight + (cellHeight - scaledHeight) / 2;
+  
         page.drawImage(img, {
-          x: (page.getWidth() - scaledWidth) / 2,
-          y: (page.getHeight() - scaledHeight) / 2,
+          x: offsetX,
+          y: offsetY,
           width: scaledWidth,
           height: scaledHeight,
         });
       }
-
+  
+      // Save and open the PDF
       const pdfBytes = await pdfDoc.save();
       const blob = new Blob([pdfBytes], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       setPdfDataUrl(url);
       setModalIsOpen(true);
     } catch (error) {
-      console.error("Error previewing PDF:", error);
+      console.error("Error generating PDF:", error);
     }
   };
+
+
+
+
+
+
+
+
+
+
+  
 
   const closeModal = () => {
     setModalIsOpen(false);
